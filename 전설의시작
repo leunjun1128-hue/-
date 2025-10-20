@@ -1,1 +1,149 @@
+import pygame
+import random
+import sys
+import time
+
+# 센서 입력용 라이브러리 (라즈베리파이 + MCP3008 예시)
+try:
+    from gpiozero import MCP3008
+    SENSOR_AVAILABLE = True
+    pot = MCP3008(channel=0)
+except ImportError:
+    SENSOR_AVAILABLE = False
+    print("센서 입력 라이브러리 없음 — 키보드 입력으로 대체")
+
+# 화면 설정
+pygame.init()
+WIDTH, HEIGHT = 480, 640
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("센서 연동 노트 낙하 게임")
+clock = pygame.time.Clock()
+
+# 색상
+WHITE = (255,255,255)
+BLACK = (0,0,0)
+RED = (255,0,0)
+GREEN = (0,255,0)
+BLUE = (0,0,255)
+
+# 판정선 위치
+JUDGE_Y = HEIGHT - 120
+
+# 노트 클래스
+class Note:
+    def __init__(self, x, attribute, speed=3):
+        self.x = x
+        self.y = 0
+        self.attribute = attribute  # 예: 0,1,2 (센서 범위 매핑)
+        self.speed = speed
+        self.width = 40
+        self.height = 20
+    
+    def update(self):
+        self.y += self.speed
+    
+    def draw(self, surface):
+        # 색상 매핑
+        if self.attribute == 0:
+            color = RED
+        elif self.attribute == 1:
+            color = GREEN
+        else:
+            color = BLUE
+        pygame.draw.rect(surface, color, (self.x, self.y, self.width, self.height))
+    
+    def is_at_judge(self):
+        return self.y + self.height >= JUDGE_Y
+
+# 게임 변수
+notes = []
+score = 0
+lives = 5
+possible_attributes = [0,1,2]
+
+font = pygame.font.Font(None,36)
+
+def draw_lives(surface, lives):
+    for i in range(lives):
+        pygame.draw.polygon(surface, RED, [
+            (20 + i*30, 20),
+            (25 + i*30, 30),
+            (20 + i*30, 40),
+            (15 + i*30, 30)
+        ])
+
+def read_sensor_value():
+    """센서 값 읽고 attribute로 매핑"""
+    if SENSOR_AVAILABLE:
+        val = pot.value  # 0.0 ~ 1.0 범위
+        # 예: 0~0.33 → attribute 0, 0.33~0.66 → 1, 나머지 → 2
+        if val < 0.33:
+            return 0
+        elif val < 0.66:
+            return 1
+        else:
+            return 2
+    else:
+        # 키보드 대체: A→0, B→1, C→2
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_a]:
+            return 0
+        elif keys[pygame.K_b]:
+            return 1
+        elif keys[pygame.K_c]:
+            return 2
+        else:
+            return None
+
+# 스폰 타이머
+spawn_timer = 0
+SPAWN_INTERVAL = 60
+
+running = True
+while running:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+    
+    # 센서 입력 읽기
+    input_attr = read_sensor_value()
+
+    # 노트 생성
+    spawn_timer += 1
+    if spawn_timer >= SPAWN_INTERVAL:
+        spawn_timer = 0
+        x = random.randint(50, WIDTH-50)
+        attr = random.choice(possible_attributes)
+        notes.append(Note(x, attr, speed=4))
+
+    # 노트 업데이트 및 판정
+    for note in notes[:]:
+        note.update()
+        if note.is_at_judge():
+            if input_attr is not None and input_attr == note.attribute:
+                score += 10
+                print("Hit! 노트 속성:", note.attribute)
+            else:
+                lives -= 1
+                print("Miss or wrong! 노트:", note.attribute, "입력:", input_attr)
+            notes.remove(note)
+
+    # 화면 그리기
+    screen.fill(BLACK)
+    pygame.draw.line(screen, WHITE, (0, JUDGE_Y), (WIDTH, JUDGE_Y), 2)
+    for note in notes:
+        note.draw(screen)
+    score_surf = font.render(f"Score: {score}", True, WHITE)
+    screen.blit(score_surf, (WIDTH-150, 20))
+    draw_lives(screen, lives)
+
+    pygame.display.flip()
+    clock.tick(60)
+
+    if lives <= 0:
+        print("Game Over!")
+        running = False
+
+pygame.quit()
+sys.exit()
 
