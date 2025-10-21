@@ -1,59 +1,106 @@
-// 가변저항 핀
-const int POT_PIN = A0;
-
-// 게임 설정 상수
-const int JUDGEMENT_LINE = 50; // 노트가 화면 하단에 닿는 Y 픽셀 위치
-const int NOTE_SPEED = 2;      // 노트 낙하 속도 (Y 픽셀 변화량)
-const int VALUE_TOLERANCE = 50; // 가변저항 값 허용 오차 (±50)
-
-// 게임 상태 변수
+// ===== 기본 게임 설정 =====
+const int potPin = A0;
+const int rows = 10;   // 9줄 + 판정선 1줄
+const int cols = 4;
+char screen[rows-1][cols]; // 0~8번 줄 (9줄)만 실제 타일 표시
 int score = 0;
-int lives = 5;
+bool gameOver = false;      // 게임 종료 여부
+unsigned long lastUpdate = 0;
+int speed = 300;
 
-// (가정) 노트 배열 정의 (간소화)
-// 실제로는 더 많은 노트가 필요하며, 구조체나 클래스 대신 배열을 사용합니다.
-int NoteY[10] = {0, -100, -200}; // 활성화된 노트의 Y 좌표
-int NoteTargetValue[10] = {200, 800, 450}; // 각 노트가 요구하는 목표 저항 값
-
-void loop() {
-  // A. 입력 읽기
-  int potValue = analogRead(POT_PIN); // 0 ~ 1023
-
-  // B. 노트 이동 및 C. 판정
-  for (int i = 0; i < 10; i++) {
-    if (NoteY[i] >= 0) { // 활성화된 노트만 이동
-      NoteY[i] += NOTE_SPEED;
-
-      // C. 판정선 근처에 도달했는지 확인
-      if (NoteY[i] >= JUDGEMENT_LINE && NoteY[i] < JUDGEMENT_LINE + NOTE_SPEED) {
-        
-        // D. 판정 처리 (사용자가 지금 버튼을 눌렀다고 가정하거나, 일정 시간 내에 판정이 이루어져야 함)
-        // **이 부분은 사용자의 입력 타이밍에 따라 매우 복잡해지므로, 가장 간단한 형태로 처리합니다.**
-        
-        // **판정 조건:** 가변저항 값이 목표 값에 도달했는지
-        if (abs(potValue - NoteTargetValue[i]) <= VALUE_TOLERANCE) {
-          // 성공
-          score += 10;
-          NoteY[i] = -1; // 노트 제거 (비활성화)
-          // 삐 소리 출력 (버저 사용)
-        } else {
-          // 실패 (노트가 판정선을 지나치도록 둘 경우, 또는 사용자가 틀린 값을 입력할 경우)
-          lives--;
-          NoteY[i] = -1; // 노트 제거
-          // 부저로 실패 소리 출력
-          if (lives <= 0) {
-            // 게임 오버 처리
-          }
-        }
-      }
+// ===== 초기화 =====
+void setup() {
+  Serial.begin(9600);
+  for(int i = 0; i < rows-1; i++) {
+    for(int j = 0; j < cols; j++) {
+      screen[i][j] = ' ';
     }
   }
+}
 
-  // E. 화면 업데이트 (OLED 라이브러리 함수 가정)
-  // display.clearDisplay();
-  // drawNotes(NoteY); // 노트 그리기
-  // drawJudgementLine(); // 판정선 그리기
-  // drawHearts(lives); // 목숨(하트) 그리기
-  // drawScore(score); // 점수 그리기
-  // display.display();
+// ===== 메인 루프 =====
+void loop() {
+  if (gameOver) return; // 게임 종료 시 더 이상 진행하지 않음
+
+  if (millis() - lastUpdate > speed) {
+    lastUpdate = millis();
+    dropTiles();
+    checkMiss();   // ❗ 타일 놓침 여부 확인
+    spawnTile();
+    checkHit();
+    drawScreen();
+  }
+}
+
+// ===== 타일 한 칸씩 아래로 이동 =====
+void dropTiles() {
+  for(int i = rows-2; i > 0; i--) { // 8~1 줄을 7~0 줄에서 이동
+    for(int j = 0; j < cols; j++) {
+      screen[i][j] = screen[i-1][j];
+    }
+  }
+  // 맨 윗줄 초기화
+  for(int j = 0; j < cols; j++) {
+    screen[0][j] = ' ';
+  }
+}
+
+// ===== 랜덤 타일 생성 =====
+void spawnTile() {
+  int pos = random(0, cols);
+  if (!gameOver) screen[0][pos] = '#';
+}
+
+// ===== ✅ 판정 성공 (맨 아래 한 줄 위, 즉 8번째 줄) =====
+void checkHit() {
+  int potValue = analogRead(potPin);
+  int inputPos = map(potValue, 0, 1023, 0, cols);
+
+  if (screen[rows-2][inputPos] == '#') {  // rows-2 = 8번째 줄
+    screen[rows-2][inputPos] = ' ';       // 타일 삭제
+    score++;
+  }
+}
+
+// ✅ **타일 놓쳤는지 확인 (판정 줄에서 성공 못하고 더 내려간 경우)**
+void checkMiss() {
+  for(int j = 0; j < cols; j++) {
+    if (screen[rows-2][j] == '#') {
+      // 타일이 판정 구역에 있는데 성공 처리 못하고 지나치면 → 게임오버
+      gameOver = true;
+      drawGameOver();
+      return;
+    }
+  }
+}
+
+// ===== 화면 출력 =====
+void drawScreen() {
+  Serial.println("============");
+  for(int i = 0; i < rows-1; i++) {   // 0~8 줄 출력
+    Serial.print("|");
+    for(int j = 0; j < cols; j++) {
+      Serial.print(" ");
+      Serial.print(screen[i][j]);
+      Serial.print(" |");
+    }
+    Serial.println();
+  }
+
+  // ✅ 판정선 표시
+  Serial.print(" ");
+  for(int j = 0; j < cols; j++) Serial.print("ㅡㅡ  ");
+  Serial.println();
+
+  Serial.print("Score: ");
+  Serial.println(score);
+}
+
+// ✅ **Game Over 화면 출력**
+void drawGameOver() {
+  Serial.println("============");
+  Serial.println("   GAME OVER   ");
+  Serial.print("Final Score: ");
+  Serial.println(score);
+  Serial.println("============");
 }
